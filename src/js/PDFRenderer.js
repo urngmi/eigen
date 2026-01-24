@@ -73,7 +73,7 @@ export class PDFRenderer {
     const rotation = tab.rotation || 0;
     
     // Use device pixel ratio for high-DPI displays (Retina, 4K, etc.)
-    const outputScale = window.devicePixelRatio || 1;
+    const dpr = window.devicePixelRatio || 1;
     
     const viewport = page.getViewport({ scale, rotation });
 
@@ -87,48 +87,46 @@ export class PDFRenderer {
     canvas.className = 'pdf-page';
     
     // Set canvas internal size to account for device pixel ratio
-    canvas.width = Math.floor(viewport.width * outputScale);
-    canvas.height = Math.floor(viewport.height * outputScale);
-    
+    canvas.width = Math.floor(viewport.width * dpr);
+    canvas.height = Math.floor(viewport.height * dpr);
     // Set canvas display size (CSS)
     canvas.style.width = `${viewport.width}px`;
     canvas.style.height = `${viewport.height}px`;
-    
     const context = canvas.getContext('2d');
-    
-    // Scale the context to match the device pixel ratio
-    const transform = outputScale !== 1 
-      ? [outputScale, 0, 0, outputScale, 0, 0] 
-      : null;
-    
-    const renderContext = {
+    // Use setTransform for sharp rendering
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    await page.render({
       canvasContext: context,
-      viewport: viewport,
-      transform: transform
-    };
-
-    await page.render(renderContext).promise;
+      viewport: viewport
+    }).promise;
 
     // Add text layer
     const textLayerDiv = document.createElement('div');
     textLayerDiv.className = 'text-layer';
     textLayerDiv.style.width = `${viewport.width}px`;
     textLayerDiv.style.height = `${viewport.height}px`;
-
     try {
       const textContent = await page.getTextContent();
-      
-      // Create text layer using the new API
-      const textLayer = new pdfjsLib.TextLayer({
-        textContentSource: textContent,
-        container: textLayerDiv,
-        viewport: viewport
-      });
-      
-      await textLayer.render();
+      // Use PDF.js text layer renderer (new API or fallback)
+      if (pdfjsLib.renderTextLayer) {
+        await pdfjsLib.renderTextLayer({
+          textContent,
+          container: textLayerDiv,
+          viewport,
+          textDivs: [],
+          enhanceTextSelection: true
+        });
+      } else {
+        // Fallback for older PDF.js
+        const textLayer = new pdfjsLib.TextLayer({
+          textContentSource: textContent,
+          container: textLayerDiv,
+          viewport: viewport
+        });
+        await textLayer.render();
+      }
     } catch (e) {
       console.error('Error rendering text layer:', e);
-      // Text layer is optional, so we can continue without it
     }
 
     // Add annotation layer
